@@ -2,6 +2,7 @@ package nostr
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -46,6 +47,13 @@ func (sub *Subscription) Sub(ctx context.Context, filters Filters) {
 // Fire sends the "REQ" command to the relay.
 // When ctx is cancelled, sub.Unsub() is called, closing the subscription.
 func (sub *Subscription) Fire(ctx context.Context) error {
+	sub.mutex.Lock()
+	defer sub.mutex.Unlock()
+
+	if sub.stopped {
+		return fmt.Errorf("subscription has already terminated")
+	}
+
 	message := []interface{}{"REQ", sub.id}
 	for _, filter := range sub.Filters {
 		message = append(message, filter)

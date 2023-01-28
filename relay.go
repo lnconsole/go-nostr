@@ -46,13 +46,15 @@ type Relay struct {
 	ConnectionError chan error
 
 	okCallbacks s.MapOf[string, func(bool)]
+
+	shouldReconnect bool
 }
 
 // RelayConnect returns a relay object connected to url.
 // Once successfully connected, cancelling ctx has no effect.
 // To close the connection, call r.Close().
 func RelayConnect(ctx context.Context, url string) (*Relay, error) {
-	r := &Relay{URL: NormalizeURL(url)}
+	r := &Relay{URL: NormalizeURL(url), shouldReconnect: true}
 	err := r.Connect(ctx)
 	return r, err
 }
@@ -89,113 +91,156 @@ func (r *Relay) Connect(ctx context.Context) error {
 	conn := NewConnection(socket)
 	r.Connection = conn
 
-	go func() {
-		for {
-			typ, message, err := conn.socket.ReadMessage()
-			if err != nil {
-				r.ConnectionError <- err
-				break
+	go r.listen(1 * time.Second)
+
+	return nil
+}
+
+func (r *Relay) listen(waitPeriod time.Duration) {
+	for {
+		typ, message, err := r.Connection.socket.ReadMessage()
+		if err != nil {
+			r.ConnectionError <- err
+
+			// reconnect
+			if r.shouldReconnect {
+				r.reconnect(waitPeriod)
 			}
 
-			if typ == websocket.PingMessage {
-				conn.WriteMessage(websocket.PongMessage, nil)
+			break
+		}
+
+		if typ == websocket.PingMessage {
+			r.Connection.WriteMessage(websocket.PongMessage, nil)
+			continue
+		}
+
+		if typ != websocket.TextMessage || len(message) == 0 || message[0] != '[' {
+			continue
+		}
+
+		var jsonMessage []json.RawMessage
+		err = json.Unmarshal(message, &jsonMessage)
+		if err != nil {
+			continue
+		}
+
+		if len(jsonMessage) < 2 {
+			continue
+		}
+
+		var label string
+		json.Unmarshal(jsonMessage[0], &label)
+
+		switch label {
+		case "NOTICE":
+			var content string
+			json.Unmarshal(jsonMessage[1], &content)
+			r.Notices <- content
+		case "AUTH":
+			var challenge string
+			json.Unmarshal(jsonMessage[1], &challenge)
+			go func() {
+				r.Challenges <- challenge
+			}()
+		case "EVENT":
+			if len(jsonMessage) < 3 {
 				continue
 			}
 
-			if typ != websocket.TextMessage || len(message) == 0 || message[0] != '[' {
-				continue
-			}
+			var channel string
+			json.Unmarshal(jsonMessage[1], &channel)
+			if subscription, ok := r.subscriptions.Load(channel); ok {
+				var event Event
+				json.Unmarshal(jsonMessage[2], &event)
 
-			var jsonMessage []json.RawMessage
-			err = json.Unmarshal(message, &jsonMessage)
-			if err != nil {
-				continue
-			}
+				// check signature of all received events, ignore invalid
+				ok, err := event.CheckSignature()
+				if !ok {
+					errmsg := ""
+					if err != nil {
+						errmsg = err.Error()
+					}
+					log.Printf("bad signature: %s", errmsg)
+					continue
+				}
 
+				// check if the event matches the desired filter, ignore otherwise
+				func() {
+					subscription.mutex.Lock()
+					defer subscription.mutex.Unlock()
+					if !subscription.Filters.Match(&event) || subscription.stopped {
+						return
+					}
+					subscription.Events <- &event
+				}()
+			}
+		case "EOSE":
 			if len(jsonMessage) < 2 {
 				continue
 			}
+			var channel string
+			json.Unmarshal(jsonMessage[1], &channel)
+			if subscription, ok := r.subscriptions.Load(channel); ok {
+				subscription.emitEose.Do(func() {
+					subscription.EndOfStoredEvents <- struct{}{}
+				})
+			}
+		case "OK":
+			if len(jsonMessage) < 3 {
+				continue
+			}
+			var (
+				eventId string
+				ok      bool
+				msg     string
+			)
+			json.Unmarshal(jsonMessage[1], &eventId)
+			json.Unmarshal(jsonMessage[2], &ok)
+			json.Unmarshal(jsonMessage[3], &msg)
 
-			var label string
-			json.Unmarshal(jsonMessage[0], &label)
+			log.Println(msg)
 
-			switch label {
-			case "NOTICE":
-				var content string
-				json.Unmarshal(jsonMessage[1], &content)
-				r.Notices <- content
-			case "AUTH":
-				var challenge string
-				json.Unmarshal(jsonMessage[1], &challenge)
-				go func() {
-					r.Challenges <- challenge
-				}()
-			case "EVENT":
-				if len(jsonMessage) < 3 {
-					continue
-				}
-
-				var channel string
-				json.Unmarshal(jsonMessage[1], &channel)
-				if subscription, ok := r.subscriptions.Load(channel); ok {
-					var event Event
-					json.Unmarshal(jsonMessage[2], &event)
-
-					// check signature of all received events, ignore invalid
-					ok, err := event.CheckSignature()
-					if !ok {
-						errmsg := ""
-						if err != nil {
-							errmsg = err.Error()
-						}
-						log.Printf("bad signature: %s", errmsg)
-						continue
-					}
-
-					// check if the event matches the desired filter, ignore otherwise
-					func() {
-						subscription.mutex.Lock()
-						defer subscription.mutex.Unlock()
-						if !subscription.Filters.Match(&event) || subscription.stopped {
-							return
-						}
-						subscription.Events <- &event
-					}()
-				}
-			case "EOSE":
-				if len(jsonMessage) < 2 {
-					continue
-				}
-				var channel string
-				json.Unmarshal(jsonMessage[1], &channel)
-				if subscription, ok := r.subscriptions.Load(channel); ok {
-					subscription.emitEose.Do(func() {
-						subscription.EndOfStoredEvents <- struct{}{}
-					})
-				}
-			case "OK":
-				if len(jsonMessage) < 3 {
-					continue
-				}
-				var (
-					eventId string
-					ok      bool
-					msg     string
-				)
-				json.Unmarshal(jsonMessage[1], &eventId)
-				json.Unmarshal(jsonMessage[2], &ok)
-				json.Unmarshal(jsonMessage[3], &msg)
-
-				log.Println(msg)
-
-				if okCallback, exist := r.okCallbacks.Load(eventId); exist {
-					okCallback(ok)
-				}
+			if okCallback, exist := r.okCallbacks.Load(eventId); exist {
+				okCallback(ok)
 			}
 		}
-	}()
+	}
+}
 
-	return nil
+func (r *Relay) reconnect(waitPeriod time.Duration) {
+	log.Printf("waiting %ds before reconnecting to %s...", waitPeriod/time.Second, r.URL)
+	time.Sleep(waitPeriod)
+
+	// persist new socket connection
+	ctx := context.Background()
+	if _, ok := ctx.Deadline(); !ok {
+		// if no timeout is set, force it to 7 seconds
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 7*time.Second)
+		defer cancel()
+	}
+
+	socket, _, err := websocket.DefaultDialer.DialContext(ctx, r.URL, nil)
+	if err != nil {
+		log.Printf("error opening websocket to '%s': %s", r.URL, err)
+		waitPeriod = 2 * waitPeriod
+	} else {
+		waitPeriod = 1 * time.Second
+	}
+	conn := NewConnection(socket)
+	r.Connection = conn
+
+	// for each sub, update socket, fire
+	r.subscriptions.Range(func(key string, value *Subscription) bool {
+		value.conn = conn
+		if err := value.Fire(context.Background()); err != nil {
+			log.Println(err)
+		}
+		return true
+	})
+
+	go r.listen(waitPeriod)
 }
 
 // Publish sends an "EVENT" command to the relay r as in NIP-01.
@@ -381,5 +426,6 @@ func (r *Relay) prepareSubscription(id string) *Subscription {
 }
 
 func (r *Relay) Close() error {
+	r.shouldReconnect = false
 	return r.Connection.Close()
 }
