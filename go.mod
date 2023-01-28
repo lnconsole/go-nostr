@@ -1,4 +1,4 @@
-module github.com/lnconsole/go-nostr 
+module github.com/lnconsole/go-nostr
 
 go 1.18
 
@@ -19,5 +19,6 @@ require (
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
+	github.com/nbd-wtf/go-nostr v0.12.0 // indirect
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
 )
