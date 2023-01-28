@@ -45,17 +45,19 @@ func (sub *Subscription) Sub(ctx context.Context, filters Filters) {
 
 // Fire sends the "REQ" command to the relay.
 // When ctx is cancelled, sub.Unsub() is called, closing the subscription.
-func (sub *Subscription) Fire(ctx context.Context) {
+func (sub *Subscription) Fire(ctx context.Context) error {
 	message := []interface{}{"REQ", sub.id}
 	for _, filter := range sub.Filters {
 		message = append(message, filter)
 	}
 
-	sub.conn.WriteJSON(message)
+	err := sub.conn.WriteJSON(message)
 
 	// the subscription ends once the context is canceled
 	go func() {
 		<-ctx.Done()
 		sub.Unsub()
 	}()
+
+	return err
 }

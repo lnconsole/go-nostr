@@ -328,7 +328,9 @@ func (r *Relay) Subscribe(ctx context.Context, filters Filters) *Subscription {
 
 	sub := r.PrepareSubscription()
 	sub.Filters = filters
-	sub.Fire(ctx)
+	if err := sub.Fire(ctx); err != nil {
+		log.Printf("(%s) failed to send REQ: %s", r.URL, err)
+	}
 
 	return sub
 }
