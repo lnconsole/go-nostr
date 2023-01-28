@@ -100,7 +100,9 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 	for {
 		typ, message, err := r.Connection.socket.ReadMessage()
 		if err != nil {
-			r.ConnectionError <- err
+			if r.shouldReconnect {
+				log.Printf("(%s) conn err: %s", r.URL, err)
+			}
 
 			// reconnect
 			if r.shouldReconnect {
@@ -209,7 +211,7 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 }
 
 func (r *Relay) reconnect(waitPeriod time.Duration) {
-	log.Printf("waiting %ds before reconnecting to %s...", waitPeriod/time.Second, r.URL)
+	// log.Printf("waiting %ds before reconnecting to %s...", waitPeriod/time.Second, r.URL)
 	time.Sleep(waitPeriod)
 
 	// persist new socket connection
@@ -226,6 +228,7 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 		log.Printf("error opening websocket to '%s': %s", r.URL, err)
 		waitPeriod = 2 * waitPeriod
 	} else {
+		log.Printf("reconnection to '%s' succeeded", r.URL)
 		waitPeriod = 1 * time.Second
 	}
 	conn := NewConnection(socket)
@@ -234,9 +237,8 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 	// for each sub, update socket, fire
 	r.subscriptions.Range(func(key string, value *Subscription) bool {
 		value.conn = conn
-		if err := value.Fire(context.Background()); err != nil {
-			log.Println(err)
-		}
+		value.Fire(context.Background())
+
 		return true
 	})
 
