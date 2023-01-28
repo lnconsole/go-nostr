@@ -225,22 +225,25 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 
 	socket, _, err := websocket.DefaultDialer.DialContext(ctx, r.URL, nil)
 	if err != nil {
+		// reconnection failed, wait longer before reconnecting
 		log.Printf("error opening websocket to '%s': %s", r.URL, err)
 		waitPeriod = 2 * waitPeriod
 	} else {
+		// reconnection succeeded, resubscribe
 		log.Printf("reconnection to '%s' succeeded", r.URL)
 		waitPeriod = 1 * time.Second
+
+		conn := NewConnection(socket)
+		r.Connection = conn
+
+		// for each sub, update socket, fire
+		r.subscriptions.Range(func(key string, value *Subscription) bool {
+			value.conn = conn
+			value.Fire(context.Background())
+
+			return true
+		})
 	}
-	conn := NewConnection(socket)
-	r.Connection = conn
-
-	// for each sub, update socket, fire
-	r.subscriptions.Range(func(key string, value *Subscription) bool {
-		value.conn = conn
-		value.Fire(context.Background())
-
-		return true
-	})
 
 	go r.listen(waitPeriod)
 }
