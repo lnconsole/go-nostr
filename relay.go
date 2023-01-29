@@ -100,9 +100,9 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 	for {
 		typ, message, err := r.Connection.socket.ReadMessage()
 		if err != nil {
-			if r.shouldReconnect {
-				log.Printf("(%s) conn err: %s", r.URL, err)
-			}
+			// if r.shouldReconnect {
+			// 	log.Printf("(%s) conn err: %s", r.URL, err)
+			// }
 
 			// reconnect
 			if r.shouldReconnect {
