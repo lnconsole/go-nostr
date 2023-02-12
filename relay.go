@@ -251,7 +251,7 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 // Publish sends an "EVENT" command to the relay r as in NIP-01.
 // Status can be: success, failed, or sent (no response from relay before ctx times out).
 func (r *Relay) Publish(ctx context.Context, event Event) Status {
-	status := PublishStatusFailed
+	status := PublishStatusSent
 
 	// data races on status variable without this mutex
 	var mu sync.Mutex
@@ -286,11 +286,6 @@ func (r *Relay) Publish(ctx context.Context, event Event) Status {
 	if err := r.Connection.WriteJSON([]interface{}{"EVENT", event}); err != nil {
 		return status
 	}
-
-	// update status (this will be returned later)
-	mu.Lock()
-	status = PublishStatusSent
-	mu.Unlock()
 
 	sub := r.Subscribe(ctx, Filters{Filter{IDs: []string{event.ID}}})
 	defer mu.Unlock()
