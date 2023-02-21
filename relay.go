@@ -227,11 +227,10 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 	if err != nil {
 		// reconnection failed, wait longer before reconnecting
 		log.Printf("error opening websocket to '%s': %s", r.URL, err)
-		waitPeriod = 2 * waitPeriod
+		waitPeriod = waitPeriod + time.Second*30
 	} else {
 		// reconnection succeeded, resubscribe
 		log.Printf("reconnection to '%s' succeeded", r.URL)
-		waitPeriod = 1 * time.Second
 
 		conn := NewConnection(socket)
 		r.Connection = conn
