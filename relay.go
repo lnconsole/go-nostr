@@ -287,7 +287,6 @@ func (r *Relay) Publish(ctx context.Context, event Event) Status {
 	}
 
 	sub := r.Subscribe(ctx, Filters{Filter{IDs: []string{event.ID}}})
-	defer mu.Unlock()
 	for {
 		select {
 		case receivedEvent := <-sub.Events:
@@ -295,6 +294,7 @@ func (r *Relay) Publish(ctx context.Context, event Event) Status {
 				// we got a success, so update our status and proceed to return
 				mu.Lock()
 				status = PublishStatusSucceeded
+				mu.Unlock()
 				return status
 			}
 		case <-ctx.Done():
@@ -303,7 +303,6 @@ func (r *Relay) Publish(ctx context.Context, event Event) Status {
 			// e.g. if this happens because of the timeout then status will probably be "failed"
 			//      but if it happens because okCallback was called then it might be "succeeded"
 			// do not return if okCallback is in process
-			mu.Lock()
 			return status
 		}
 	}
