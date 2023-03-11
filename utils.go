@@ -6,7 +6,7 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-func Similar[E constraints.Ordered](as, bs []E) bool {
+func similar[E constraints.Ordered](as, bs []E) bool {
 	if len(as) != len(bs) {
 		return false
 	}
@@ -27,7 +27,7 @@ func Similar[E constraints.Ordered](as, bs []E) bool {
 	return true
 }
 
-func ContainsPrefixOf(haystack []string, needle string) bool {
+func containsPrefixOf(haystack []string, needle string) bool {
 	for _, hay := range haystack {
 		if strings.HasPrefix(needle, hay) {
 			return true
