@@ -217,17 +217,16 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 	// persist new socket connection
 	ctx := context.Background()
 	if _, ok := ctx.Deadline(); !ok {
-		// if no timeout is set, force it to 7 seconds
+		// if no timeout is set, force it to 3 seconds
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 7*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 	}
 
 	socket, _, err := websocket.DefaultDialer.DialContext(ctx, r.URL, nil)
 	if err != nil {
-		// reconnection failed, wait longer before reconnecting
+		// reconnection failed
 		log.Printf("error opening websocket to '%s': %s", r.URL, err)
-		waitPeriod = waitPeriod + time.Second*30
 	} else {
 		// reconnection succeeded, resubscribe
 		log.Printf("reconnection to '%s' succeeded", r.URL)
