@@ -100,15 +100,10 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 	for {
 		typ, message, err := r.Connection.socket.ReadMessage()
 		if err != nil {
-			// if r.shouldReconnect {
-			// 	log.Printf("(%s) conn err: %s", r.URL, err)
-			// }
-
 			// reconnect
 			if r.shouldReconnect {
 				r.reconnect(waitPeriod)
 			}
-
 			break
 		}
 
@@ -211,7 +206,7 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 }
 
 func (r *Relay) reconnect(waitPeriod time.Duration) {
-	// log.Printf("waiting %ds before reconnecting to %s...", waitPeriod/time.Second, r.URL)
+	// sleep
 	time.Sleep(waitPeriod)
 
 	// persist new socket connection
@@ -227,13 +222,16 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 	if err != nil {
 		// reconnection failed
 		log.Printf("error opening websocket to '%s': %s", r.URL, err)
+		// reconnect again
+		if r.shouldReconnect {
+			go r.reconnect(waitPeriod)
+		}
 	} else {
 		// reconnection succeeded, resubscribe
 		log.Printf("reconnection to '%s' succeeded", r.URL)
 
 		conn := NewConnection(socket)
 		r.Connection = conn
-
 		// for each sub, update socket, fire
 		r.subscriptions.Range(func(key string, value *Subscription) bool {
 			value.conn = conn
@@ -241,9 +239,9 @@ func (r *Relay) reconnect(waitPeriod time.Duration) {
 
 			return true
 		})
+		// start reading for msgs
+		go r.listen(waitPeriod)
 	}
-
-	go r.listen(waitPeriod)
 }
 
 // Publish sends an "EVENT" command to the relay r as in NIP-01.
