@@ -58,6 +58,8 @@ type Relay struct {
 	// custom things that aren't often used
 	//
 	AssumeValid bool // this will skip verifying signatures for events received from this relay
+
+	reconnectFilters chan Filters // filters to resubscribe to when the connection breaks
 }
 
 type writeRequest struct {
@@ -66,7 +68,7 @@ type writeRequest struct {
 }
 
 // NewRelay returns a new relay. The relay connection will be closed when the context is canceled.
-func NewRelay(ctx context.Context, url string, opts ...RelayOption) *Relay {
+func NewRelay(ctx context.Context, url string, reconnectFilters chan Filters, opts ...RelayOption) *Relay {
 	ctx, cancel := context.WithCancel(ctx)
 	r := &Relay{
 		URL:                           NormalizeURL(url),
@@ -76,6 +78,7 @@ func NewRelay(ctx context.Context, url string, opts ...RelayOption) *Relay {
 		okCallbacks:                   xsync.NewMapOf[func(bool, *string)](),
 		writeQueue:                    make(chan writeRequest),
 		subscriptionChannelCloseQueue: make(chan *Subscription),
+		reconnectFilters:              reconnectFilters,
 	}
 
 	for _, opt := range opts {
@@ -115,7 +118,7 @@ func NewRelay(ctx context.Context, url string, opts ...RelayOption) *Relay {
 // Once successfully connected, cancelling ctx has no effect.
 // To close the connection, call r.Close().
 func RelayConnect(ctx context.Context, url string, opts ...RelayOption) (*Relay, error) {
-	r := NewRelay(context.Background(), url, opts...)
+	r := NewRelay(context.Background(), url, nil, opts...)
 	err := r.Connect(ctx)
 	return r, err
 }
@@ -199,6 +202,15 @@ func (r *Relay) Connect(ctx context.Context) error {
 		}
 		// stop the ticker
 		ticker.Stop()
+
+		// send filters to reconnectFilters channel
+		if r.reconnectFilters != nil {
+			r.Subscriptions.Range(func(_ string, sub *Subscription) bool {
+				r.reconnectFilters <- sub.Filters
+				return true
+			})
+		}
+
 		// close all subscriptions
 		r.Subscriptions.Range(func(_ string, sub *Subscription) bool {
 			go sub.Unsub()
@@ -465,7 +477,6 @@ func (r *Relay) Auth(ctx context.Context, event Event) (Status, error) {
 // The subscription is closed when context ctx is cancelled ("CLOSE" in NIP-01).
 func (r *Relay) Subscribe(ctx context.Context, filters Filters, opts ...SubscriptionOption) (*Subscription, error) {
 	sub := r.PrepareSubscription(ctx, filters, opts...)
-
 	if err := sub.Fire(); err != nil {
 		return nil, fmt.Errorf("couldn't subscribe to %v at %s: %w", filters, r.URL, err)
 	}
