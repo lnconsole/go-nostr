@@ -196,7 +196,7 @@ func (r *Relay) listen(waitPeriod time.Duration) {
 			json.Unmarshal(jsonMessage[2], &ok)
 			json.Unmarshal(jsonMessage[3], &msg)
 
-			log.Println(msg)
+			// log.Println(msg)
 
 			if okCallback, exist := r.okCallbacks.Load(eventId); exist {
 				okCallback(ok)
